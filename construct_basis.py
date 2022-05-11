@@ -10,6 +10,7 @@
 import numpy as np
 from math import gcd
 from functools import reduce
+from math import hypot
 
 
 def check_for_primitivity(vec: np.array) -> np.array:
@@ -56,6 +57,50 @@ def extended_euclid_gcd(a: int, b: int) -> list:
         old_s, s = s, old_s - quotient*s
         old_t, t = t, old_t - quotient*t
     return [old_r, old_s, old_t]
+
+
+def unimodular_2(x: int, y: int) -> (int, int, int, np.array):
+    """
+        Compute a 2 dimensional unimodular matrix from integer inputs
+    :param x: integer 1, int
+    :param y: integer 2, int
+    :return: unimodular matrix, int-(2, 2)-ndarray
+    """
+    d, a, b = extended_euclid_gcd(x, y)
+    return a, b, d, np.array([[x/d, -b],
+                              [y/d, a]]),
+
+
+def construct_basis(prim_vec: np.array, basis: np.array) -> np.array:
+    """
+        Construct a basis from the previous basis and a primitive vector.
+    :param prim_vec: primitive vector with gcd = 1 across the vector
+    :param basis: original basis
+    :return: updated basis
+    """
+    q, r = np.linalg.qr(basis)
+    z = np.eye(basis.shape[0])
+    for j in range(basis.shape[0]-1, 0, -1):
+        a, b, d, U = unimodular_2(prim_vec[j-1], prim_vec[j])
+        prim_vec[j-1] = d
+        r[0:j+1, j-1:j+1] = r[0:j+1, j-1:j+1] @ U
+        z[:, j-1:j+1] = z[:, j-1:j+1] @ U
+        if r[j, j] != 0:
+            h = hypot(r[j-1, j], r[j, j])
+            d = 1. / h
+            c = abs(r[j-1, j]) * d
+            s = np.sign(r[j-1, j])*d*r[j, j]
+        else:
+            c = 1.
+            s = 0.
+        G = np.array([[c, -s],
+                      [s, c]])
+        r[j-1:j+1, j-1:] = G @ r[j-1:j+1, j-1:]
+    return basis @ z
+
+
+
+
 
 
 def construct_basis_from_primitive_vec(vec: np.array, basis: np.array, preserve_rows=None) -> np.array:

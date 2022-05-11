@@ -31,7 +31,7 @@ class QAOA:
         self.basis = qp.Qobj(pars['basis'])
         self.dimension = pars['basis'].shape[0]
         self.int_range = pars['integer_range']
-        self.num_qubits = 6 # todo: compute this from integer range
+        self.num_qubits = 6  # todo: compute this from integer range
         if 'fix_Hp' not in pars:
             self.fix_Hp = False
         else:
@@ -40,6 +40,11 @@ class QAOA:
             self.fix_beta = False
         else:
             self.fix_beta = pars['fix_beta']
+
+        # Optimisation parameters
+        self.gamma = pars['gamma']
+        self.beta = pars['beta']
+        self.tlist = pars['tlist']
 
         # Simulation parameters
         self.iters = pars['iters']
@@ -54,6 +59,19 @@ class QAOA:
         self.step_track.append(0)
         self.norm_track[0] = self.norms()
         self.avg_norm_track[0] = self.avg_norm()
+
+        # initial state
+        self.psi_0 = self.set_psi_0()
+        self.current_psi = self.psi_0
+
+        # problem hamiltonians and propagators
+        self.initial_problem_ham = self.update_problem_ham()
+        self.problem_ham = self.update_problem_ham()
+        self.problem_prop = self.update_problem_prop()
+        self.problem_prop_min = self.update_problem_prop(minimum=True)
+        self.driver_ham = self.compute_driver_ham()
+        self.driver_prop = self.set_driver_prop()
+        self.driver_prop_min = self.set_driver_prop(minimum=True)
 
     def to_vec(self):
         """
@@ -114,7 +132,7 @@ class QAOA:
         x = [2**(k-1)*self.pauli_z(k) for k in range(self.num_qubits)]
         return sum(x) + qp.tensor([qp.qeye(2)]*self.num_qubits)/2
 
-    def problem_ham(self):
+    def update_problem_ham(self):
         """
             Computing the problem Hamiltonian for the VQE
         :return: qutip tensor representation of Hamiltonian
@@ -137,23 +155,169 @@ class QAOA:
             Set of problem Hamiltonians for given set.
         :return: list of qutip tensors
         """
-        estates = self.problem_ham().eigenstates()[1]
-        return [self.problem_ham()*i*i.dag() for i in estates]
+        estates = self.problem_ham.eigenstates()[1]
+        return [self.problem_ham*i*i.dag() for i in estates]
 
-    def driver_ham(self):
+    def update_problem_prop(self, minimum=False):
+        """
+            Update the problem propagator
+        :param minimum: return the minimal version
+        :return: qutip propagator
+        """
+        if not minimum:
+            return qp.propagator(self.gamma*self.problem_prop, self.tlist)
+        else:
+            return qp.propagator(self.gamma*self.problem_prop, self.tlist, unitary_mode='single')
+
+    def compute_driver_ham(self):
         """
             Computing the driver (ansatze) hamiltonian for the VQE
         :return: qutip tensor representation of Hamiltonian
         """
         return sum([self.pauli_x(i) for i in range(self.num_qubits*self.dimension)])
 
-    def psi_0(self):
+    def set_psi_0(self):
         """
-            Compute basis state.
+            Compute initial state.
         :return: qutip eigenstates
         """
         string = [qp.qeye(2)] * self.num_qubits * self.dimension
         return sum(qp.tensor(string).eigenstates()[1]).unit()
+
+    def set_driver_prop(self, minimum=False):
+        """
+            Compute driver propagator
+        :param minimum: return the minimal version
+        :return: qutip propagator
+        """
+        if minimum:
+            return qp.propagator(self.beta*self.driver_ham, self.tlist, unitary_mode='single')
+        else:
+            return qp.propagator(self.beta*self.driver_ham, self.tlist)
+
+    def psi(self, minimum=None):
+        """
+            Compute current state.
+        :param minimum:
+        :return: propagated stated, qutip eigenstate
+        """
+        if self.fix_beta:
+            arg = np.round((.25*np.pi)/self.tlist[1])
+            if minimum is not None:
+                return self.problem_prop_min[arg]*self.driver_prop_min[minimum]*self.psi_0
+            else:
+                return self.driver_prop[arg]*self.problem_prop*self.psi_0
+        else:
+            if minimum is not None:
+                return self.driver_prop_min[minimum]*self.problem_prop_min[minimum]*self.psi_0
+            else:
+                return self.driver_prop*self.problem_prop*self.psi_0
+
+    def expectation(self, minimum=None):
+        """
+            Compute expectation value
+        :param minimum: given minimum to run on
+        :return: expectation value
+        """
+        if minimum is not None:
+            return qp.expect(self.problem_ham_i(), self.psi(minimum=minimum))
+        else:
+            return qp.expect(self.problem_ham, self.psi())
+
+    def find_states(self):
+        """
+            Find states....?
+        :return: states...?
+        """
+        expec = self.expectation()
+        minimum = np.argmin(expec)
+        exp_min = self.expectation(minimum=minimum)
+
+        prob_ham_estates = self.problem_ham.eigenstates()
+        prob_min = np.zeros(len(exp_min))
+        for i in range(prob_min.shape[0]):
+            if prob_ham_estates[0][i] == 0:
+                prob_min[i] = 0
+            else:
+                prob_min[i] = exp_min[i] / prob_ham_estates[0][i]
+
+        E = prob_ham_estates.tolist()
+
+        for x in range(0, 3):
+            for i in range(prob_min.shape[0]):
+                if i < prob_min.shape[0] - 1:
+                    for j in range(i+1, i+2):
+                        if E[i] == E[j]:
+                            prob_min[i] += prob_min[j]
+                            np.delete(prob_min, j)
+                            E.pop(j)
+                        else:
+                            pass
+        prob_min[0] = 1 - np.sum(prob_min)
+        return prob_min, E
+
+    def solve(self, evalue):
+        """
+            Solve for integer values for given eigenvalue, agnostic to dimension just brute force searches over integers
+            for element with corresponding norm?
+
+            Todo: there must be a smarter way to solve for this?
+        :param evalue: given eigenvalue
+        :return: integer vector
+        """
+        b = self.to_vec()
+        max_range = 2**self.num_qubits
+
+        for int_guess in it.combinations_with_replacement(np.arange(-max_range, max_range-1), self.dimension):
+            if np.round(np.linalg.norm(np.dot(b.T, int_guess))**2) == evalue:
+                return np.dot(b.T, int_guess)
+            else:
+                pass
+        return None
+
+    def sim_step(self):
+        """
+            Step of the montecarlo simulation
+        :return: updates simulation parameters
+        """
+        b = self.to_vec()
+        basis_E = np.linalg.norm(basis, axis=1)
+        prob, evalues = self.find_states()
+        det = np.linalg.det(basis)
+        chosen_E = 9e10
+        det_new = 0
+        basis_new = np.zeros((self.dimension, self.dimension))
+        rand_vec = None
+        while max(basis_E) <= chosen_E or \
+                np.abs(np.round(det)) != np.abs(np.round(det_new)) or \
+                (basis_new == b).all() or \
+            rand_vec is None:
+            self.current_iter += 1
+            if self.current_iter >= self.iters:
+                print(f'max step achieved: {self.iters}')
+                exit()
+            else:
+                rand_ind = np.random.choice(np.arange(prob.shape[0]), p=prob)
+                chosen_E = evalues[rand_ind]
+                chosen_P = prob[rand_ind]
+                rand_vec = self.solve(chosen_E)
+
+                if rand_vec is None:
+                    rand_vec = [0]*self.basis.dims[0][0]
+                    chosen_E = 9e10
+                    print('solution is None')
+
+                possible_list = []
+                for i in range(basis_E.shape[0]):
+                    if basis_E[i] > chosen_E:
+                        possible_list.append(basis_E[i])
+                    else:
+                        pass
+
+                possible_list = sorted(possible_list, reverse=True)
+
+                for i in range(len(possible_list)):
+                    basis_ = basis.tolist()
 
 
 

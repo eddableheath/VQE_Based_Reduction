@@ -182,7 +182,6 @@ class QAOA():
             x.append(xi)
         return x
 
-
     def find_states(self,gamma,beta,tlist):
         exp = self.expect(gamma,beta,tlist)
         #default parameters
