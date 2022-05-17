@@ -9,6 +9,7 @@ import scipy as sp
 import qutip as qp
 import itertools as it
 import sys
+import construct_basis as cb
 np.set_printoptions(threshold=sys.maxsize)
 
 
@@ -26,12 +27,15 @@ class QAOA:
             - iters: max iteration, int
             - fix_Hp: choose whether to fix Hp or not, bool
             - fix_beta: choose whether to fix beta or not, bool
+            - gamma: gamma parameter
+            - beta: beta parameter
+            - tlist: tlist...?
         """
         # Problem parameters
         self.basis = qp.Qobj(pars['basis'])
         self.dimension = pars['basis'].shape[0]
         self.int_range = pars['integer_range']
-        self.num_qubits = 6  # todo: compute this from integer range
+        self.num_qubits = 2  # todo: compute this from integer range
         if 'fix_Hp' not in pars:
             self.fix_Hp = False
         else:
@@ -54,7 +58,7 @@ class QAOA:
         self.basis_track.append(self.basis)
         self.magnitude_track = []
         self.avg_norm_track = np.zeros(self.iters)
-        self.norm_track = np.zeros(self.iters, self.dimension)
+        self.norm_track = np.zeros((self.iters, self.dimension))
 
         self.step_track.append(0)
         self.norm_track[0] = self.norms()
@@ -165,9 +169,9 @@ class QAOA:
         :return: qutip propagator
         """
         if not minimum:
-            return qp.propagator(self.gamma*self.problem_prop, self.tlist)
+            return qp.propagator(self.gamma*self.problem_ham, self.tlist)
         else:
-            return qp.propagator(self.gamma*self.problem_prop, self.tlist, unitary_mode='single')
+            return qp.propagator(self.gamma*self.problem_ham, self.tlist, unitary_mode='single')
 
     def compute_driver_ham(self):
         """
@@ -307,30 +311,51 @@ class QAOA:
                     chosen_E = 9e10
                     print('solution is None')
 
-                possible_list = []
-                for i in range(basis_E.shape[0]):
-                    if basis_E[i] > chosen_E:
-                        possible_list.append(basis_E[i])
-                    else:
-                        pass
+                prim_vec = cb.check_for_primitivity(rand_vec)
+                new_basis = cb.construct_basis(prim_vec, b)
+                if np.round(np.linalg.det(new_basis)) == np.round(np.linalg.det(b)):
+                    b = new_basis
+                else:
+                    print('basis construnction failed')
 
-                possible_list = sorted(possible_list, reverse=True)
+        self.basis = qp.Qobj(np.transpose(b).tolist())
+        total_E = np.linalg.norm(b)
+        avg_norm = np.round(self.avg_norm(), 2)
 
-                for i in range(len(possible_list)):
-                    basis_ = basis.tolist()
+        self.norm_track[self.current_iter] = self.norms()
+        self.basis_track[self.current_iter] = self.basis
+        self.magnitude_track.append(total_E)
 
+        print(f'iteration {self.current_iter} ----------------------------------------------------')
+        print(f'selected state: {chosen_E}')
+        print(f'with probability: {chosen_P}')
+        print(f'norms: {self.norm_track[self.current_iter]}')
+        print(f'average norms: {self.avg_norm_track[self.current_iter]}')
+        print(f'new basis: {self.basis}')
+        self.problem_ham = self.update_problem_ham()
+        self.problem_prop = self.update_problem_prop()
+        self.problem_prop_min = self.update_problem_prop(minimum=True)
 
+    def iterate(self):
+        while self.current_iter <= self.iters:
+            self.sim_step()
 
 
 if __name__ == "__main__":
-    basis = np.array([[1, 2, -4, 0],
-                      [-1, -4, -3, 5],
-                      [-1, -8, 6, 9],
-                      [9, -2, 2, 9]])
-    int_range = 6
+    basis = np.array([[3, 0, 15, -12],
+                      [0, 4, 3, 8],
+                      [28, -18, 9, 8],
+                      [0, 0, 3, -4]])
+    int_range = 2
     parameters = {
         'basis': basis,
         'integer_range': int_range,
         'fix_Hp': False,
-        'fix_beta': False
+        'fix_beta': False,
+        'gamma': 1,
+        'beta': 1,
+        'tlist': np.arange(0, 1, .1),
+        'iters': 500
     }
+    experiment = QAOA(**parameters)
+    experiment.iterate()

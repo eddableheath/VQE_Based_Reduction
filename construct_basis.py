@@ -24,19 +24,6 @@ def check_for_primitivity(vec: np.array) -> np.array:
     return vec
 
 
-def check_for_coprimes(vec: np.array):
-    """
-        Looks for pairs of numbers in the vector that are coprime, returning the location or the first one found.
-    :param vec: input vector, int-(m, )-ndarray
-    :return: indices of coprime pair, int-list
-    """
-    for i in range(vec.shape[0]):
-        for j in range(i, vec.shape[0]):
-            if gcd(vec[i], vec[j]) == 1:
-                return [i, j]
-    return None
-
-
 def extended_euclid_gcd(a: int, b: int) -> list:
     """
     Returns a list `result` of size 3 where:
@@ -50,9 +37,7 @@ def extended_euclid_gcd(a: int, b: int) -> list:
     r = b; old_r = a
 
     while r != 0:
-        quotient = old_r//r # In Python, // operator performs integer or floored division
-        # This is a pythonic way to swap numbers
-        # See the same part in C++ implementation below to know more
+        quotient = old_r//r
         old_r, r = r, old_r - quotient*r
         old_s, s = s, old_s - quotient*s
         old_t, t = t, old_t - quotient*t
@@ -87,9 +72,9 @@ def construct_basis(prim_vec: np.array, basis: np.array) -> np.array:
         z[:, j-1:j+1] = z[:, j-1:j+1] @ U
         if r[j, j] != 0:
             h = hypot(r[j-1, j], r[j, j])
-            d = 1. / h
-            c = abs(r[j-1, j]) * d
-            s = np.sign(r[j-1, j])*d*r[j, j]
+            p = 1. / h
+            c = abs(r[j-1, j]) * p
+            s = np.sign(r[j-1, j])*p*r[j, j]
         else:
             c = 1.
             s = 0.
@@ -99,47 +84,17 @@ def construct_basis(prim_vec: np.array, basis: np.array) -> np.array:
     return basis @ z
 
 
-
-
-
-
-def construct_basis_from_primitive_vec(vec: np.array, basis: np.array, preserve_rows=None) -> np.array:
-    """
-        Given a vector return a primitive vector (if not already) and construct a new basis if there exists at least one
-        pair of coprimes within the vector.
-    :param vec: input vector, int-(m, )-ndarray
-    :param basis: problem basis, int-(m, m)-ndarray
-    :param preserve_rows: which basis vectors to preserve, list
-    :return: new basis matrix, int-(m, m)-ndarray
-    """
-    unimodular = np.zeros_like(basis)
-    identity = np.eye(basis.shape[0])
-    prim_vec = check_for_primitivity(vec)
-    coprime_pair = check_for_coprimes(prim_vec)
-    if coprime_pair is not None:
-        _, a_1, a_2 = extended_euclid_gcd(prim_vec[coprime_pair[0]],
-                                          prim_vec[coprime_pair[1]])
-        unimodular[0] = prim_vec
-        unimodular[1, coprime_pair[0]] = a_2
-        unimodular[1, coprime_pair[1]] = a_1
-        reduced_id = np.delete(identity, coprime_pair, axis=0)
-        for i in range(reduced_id.shape[0]-1, -1, -1):
-            unimodular[-1-i] = reduced_id[i]
-        return unimodular @ basis
-    else:
-        return None
-
 # testing
 if __name__ == "__main__":
-    B = np.array([[1, 2, -4],
-                  [-1, -4, -3],
-                  [-1, -8, 6]])
-    v = np.array([4, 6, 10])
+    B = np.array([[3, 0, 15, -12],
+                  [0, 4, 3, 8],
+                  [28, -18, 9, 8],
+                  [0, 0, 3, -4]])
+    v = np.array([1, 2, 3, 5])
     print(v)
     new_v = check_for_primitivity(v)
     print(new_v)
-    coprime_pair = check_for_coprimes(new_v)
-    print(coprime_pair)
-    print(new_v[coprime_pair[0]], new_v[coprime_pair[1]])
-    new_b = construct_basis_from_primitive_vec(v, B.T)
-    print(new_b)
+    new_basis = construct_basis(new_v, B)
+    print(new_basis)
+    print(np.linalg.det(B))
+    print(np.linalg.det(new_basis))
